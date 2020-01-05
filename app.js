@@ -26,7 +26,9 @@ var budgetController = (function() {
         totals: {
             exp: 0,
             inc: 0
-        }
+        },
+        budget: 0,
+        percentage: -1
     }
 
     // Return object containing public interface
@@ -51,12 +53,28 @@ var budgetController = (function() {
             // Update total
             data.totals[type] += value;
 
+            // Update budget
+            data.budget = data.totals.inc - data.totals.exp;
+
+            // Update percentage
+            if (data.totals.inc > 0) {
+                data.percentage = Math.round((data.totals.exp / data.totals.inc) * 100);
+            }
+            else {
+                data.percentage = -1;
+            }
+
             // Return the new element for use in other modules
             return toAdd;
         },
         // Testing function
-        getTotal: function(type) {
-            return data.totals[type];
+        getBudget: function() {
+            return {
+                budget: data.budget,
+                totalInc: data.totals.inc,
+                totalExp: data.totals.exp,
+                percentage: data.percentage
+            }
         }
     }
 
@@ -76,7 +94,9 @@ var UIController = (function() {
         // Top summary
         netBudget: '.budget__value',
         incTotal: '.budget__income--value',
-        expTotal: '.budget__expenses--value'
+        expTotal: '.budget__expenses--value',
+        month: '.budget__title--month',
+        percentageDisplay: '.budget__expenses--percentage'
     }
 
     return {
@@ -85,7 +105,7 @@ var UIController = (function() {
             // Get all the values
             return {
                 desc: document.querySelector(DOMstrs.inputDesc).value, // description
-                value: parseInt(document.querySelector(DOMstrs.inputVal).value), // how much money
+                value: parseFloat(document.querySelector(DOMstrs.inputVal).value), // how much money
                 type: document.querySelector(DOMstrs.inputType).value // plus or minus
             }
         },
@@ -120,10 +140,17 @@ var UIController = (function() {
         },
         // Update totals
         // Private function to update totals
-        updateTotals: function(incTotal, expTotal) {
-            document.querySelector(DOMstrs.incTotal).textContent = incTotal;
-            document.querySelector(DOMstrs.expTotal).textContent = expTotal;
-            document.querySelector(DOMstrs.netBudget).textContent = incTotal - expTotal;
+        displayBudget: function(object) {
+            document.querySelector(DOMstrs.incTotal).textContent = object.incTotal;
+            document.querySelector(DOMstrs.expTotal).textContent = object.expTotal;
+            document.querySelector(DOMstrs.netBudget).textContent = object.budget;
+            if(object.percentage !== -1) { // If there is a valid percentage
+                document.querySelector(DOMstrs.percentageDisplay).style.visibility = 'visible';
+                document.querySelector(DOMstrs.percentageDisplay).textContent = object.percentage + '%';
+            } 
+            else { // Might not be valid
+                document.querySelector(DOMstrs.percentageDisplay).style.visibility = 'hidden';
+            }
         },
         // Clear the input fields - used after adding an item
         clearFields: function() {
@@ -137,6 +164,11 @@ var UIController = (function() {
             });
             // Move keyboard focus back to the first input field
             fieldArr[0].focus();
+        },
+        // 
+        updateDate: function(month) {
+            // Update date in DOM
+            document.querySelector(DOMstrs.month).textContent = month;
         }
     };
 })();
@@ -164,16 +196,29 @@ var controller = (function(budgetCtrl, UICtrl) {
 
     // Private function to update summary
     function updateSummary() {
-        var incTotal = budgetController.getTotal('inc');
-        var expTotal = budgetController.getTotal('exp')
-        UICtrl.updateTotals(incTotal, expTotal);
+        // Get the budget from the budget controller
+        var obj = budgetCtrl.getBudget();
+
+        // Tell the UI to update it
+        UICtrl.displayBudget(obj);
     }
 
+    function getAndUpdateDate() {
+        // Month name
+        var date = new Date();  // Date today
+        var month = date.toLocaleString('default', { month: 'long' });
+        UICtrl.updateDate(month);
+    }
+
+    // Callback for adding item
     var ctrlAddItemFunction = function() {
         var inputs, item;
 
         // 1. Get input values
         inputs = UICtrl.getInput();
+
+        // Handle invalid inputs
+        if (inputs.desc === '' || isNaN(inputs.value) || inputs.value <= 0) return;
         
         // 2. Add the item to budget controller
         item = budgetCtrl.addItem(inputs.type, inputs.desc, inputs.value);
@@ -184,16 +229,15 @@ var controller = (function(budgetCtrl, UICtrl) {
         // 6. Clear the input fields
         UICtrl.clearFields();
 
-        // 4. Calculate the new balance
+        // 4. Calculate and update the new balance
         updateSummary();
-
-        // 5. Display the budget        
     };
 
     return {
         init: function() {
             updateSummary();
             setupEventListeners();
+            getAndUpdateDate();
         }
     }
 
