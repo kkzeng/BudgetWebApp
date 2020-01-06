@@ -31,6 +31,23 @@ var budgetController = (function() {
         percentage: -1
     }
 
+    // Private helper function to update totals
+    function updateTotalsAndRecalculate(type, value) {
+        // Update total
+        data.totals[type] += value;
+
+        // Update budget
+        data.budget = data.totals.inc - data.totals.exp;
+
+        // Update percentage
+        if (data.totals.inc > 0) {
+            data.percentage = Math.round((data.totals.exp / data.totals.inc) * 100);
+        }
+        else {
+            data.percentage = -1;
+        }
+    }
+
     // Return object containing public interface
     return {
         addItem: function(type, desc, value) {
@@ -50,29 +67,35 @@ var budgetController = (function() {
             // Can use type to access correct array in object
             data.allItems[type].push(toAdd);
 
-            // Update total
-            data.totals[type] += value;
-
-            // Update budget
-            data.budget = data.totals.inc - data.totals.exp;
-
-            // Update percentage
-            if (data.totals.inc > 0) {
-                data.percentage = Math.round((data.totals.exp / data.totals.inc) * 100);
-            }
-            else {
-                data.percentage = -1;
-            }
+            updateTotalsAndRecalculate(type, value);
 
             // Return the new element for use in other modules
             return toAdd;
+        },
+        deleteItem: function(type, id) {
+            // Remove the correct item
+            // Use map function to get list of ids
+            var ids = data.allItems[type].map(function(cur) {
+                return cur.id;
+            });
+
+            var idxToRemove = ids.indexOf(id);
+
+            // Save the object to be removed to update totals
+            var objToRemove = data.allItems[type][idxToRemove];
+
+            // Remove the object from the array
+            data.allItems[type] = data.allItems[type].splice(idxToRemove, 1); // remove 1 element from idx
+
+            // Update total
+            updateTotalsAndRecalculate(type, -objToRemove.value); // pass negative to subtract
         },
         // Testing function
         getBudget: function() {
             return {
                 budget: data.budget,
-                totalInc: data.totals.inc,
-                totalExp: data.totals.exp,
+                incTotal: data.totals.inc,
+                expTotal: data.totals.exp,
                 percentage: data.percentage
             }
         }
@@ -91,12 +114,13 @@ var UIController = (function() {
         // List of items
         incList: '.income__list',
         expList: '.expenses__list',
+        container: '.container',
         // Top summary
         netBudget: '.budget__value',
         incTotal: '.budget__income--value',
         expTotal: '.budget__expenses--value',
         month: '.budget__title--month',
-        percentageDisplay: '.budget__expenses--percentage'
+        percentageDisplay: '.budget__expenses--percentage'    
     }
 
     return {
@@ -119,7 +143,7 @@ var UIController = (function() {
 
             // Create HTML string with placeholder
             var html = 
-            `<div class="item clearfix" id="income-%id%">
+            `<div class="item clearfix" id="%id%">
                 <div class="item__description">%desc%</div>
                 <div class="right clearfix">
                     <div class="item__value">${type === 'exp'? '-': '+'} %value%</div>
@@ -130,20 +154,31 @@ var UIController = (function() {
             </div>`;
             
             // Replace placeholder with real data
-            var newHtml = html.replace('%id%', object.id);
+            var newHtml = html.replace('%id%', type + '-' + object.id);
             newHtml = newHtml.replace('%desc%', object.desc);
             newHtml = newHtml.replace('%value%', object.value);
 
             // Insert HTML into DOM
-            
+            // afterbegin so that most recent item is at the top
             document.querySelector(DOMstrs[type+'List']).insertAdjacentHTML('afterbegin', newHtml);
+        },
+        removeListItem: function(id, type) {
+            // Remove object from DOM
+            var elem = document.querySelector('#' + type + '-' + id);
+            elem.remove();
+
+            // can alternatively use:
+            // elem.parentNode.removeChild(elem);
         },
         // Update totals
         // Private function to update totals
         displayBudget: function(object) {
-            document.querySelector(DOMstrs.incTotal).textContent = object.incTotal;
-            document.querySelector(DOMstrs.expTotal).textContent = object.expTotal;
+            // Update UI for different totals and subtotals
+            document.querySelector(DOMstrs.incTotal).textContent = '+ ' + object.incTotal;
+            document.querySelector(DOMstrs.expTotal).textContent = '- ' + object.expTotal;
             document.querySelector(DOMstrs.netBudget).textContent = object.budget;
+
+            // Toggle visibility depending on if percentage should be displayed
             if(object.percentage !== -1) { // If there is a valid percentage
                 document.querySelector(DOMstrs.percentageDisplay).style.visibility = 'visible';
                 document.querySelector(DOMstrs.percentageDisplay).textContent = object.percentage + '%';
@@ -185,6 +220,7 @@ var controller = (function(budgetCtrl, UICtrl) {
         // Add event handling for the add button
         document.querySelector(DOMstrs.addBtn).addEventListener('click', ctrlAddItemFunction);
 
+        // Add event handling for Enter button to add
         document.addEventListener('keydown', function(event) {
             // Note: older browsers may use 'which' property
             if(event.keyCode === 13 || event.which === 13) {
@@ -192,6 +228,10 @@ var controller = (function(budgetCtrl, UICtrl) {
                 ctrlAddItemFunction();
           }
         });
+
+        // Add event handler to delete individual list items
+        // Use Event Delegation to handle events for DOM items not existing yet
+        document.querySelector(DOMstrs.container).addEventListener('click', ctrlDeleteItemFunction);
     };
 
     // Private function to update summary
@@ -232,6 +272,29 @@ var controller = (function(budgetCtrl, UICtrl) {
         // 4. Calculate and update the new balance
         updateSummary();
     };
+
+    // Callback for deleting item
+    var ctrlDeleteItemFunction = function(event) {
+        // Traverse DOM to get to the ID
+        // Hardcoded DOM structure
+        var itemID = event.target.parentNode.parentNode.parentNode.parentNode.id;
+        // Leverage fact that only items in this container have an ID
+        if (itemID) {
+            // Split this into a more convenient form
+            var splitID = itemID.split('-');
+            var type = splitID[0];
+            var id = parseInt(splitID[1]);
+
+            // 1. Delete item from data structure
+            budgetCtrl.deleteItem(type, id);
+
+            // 2. Delete item from UI
+            UICtrl.removeListItem(id, type);
+
+            // 3. Update UI to show new summarized info
+            updateSummary();
+        }
+    }
 
     return {
         init: function() {
